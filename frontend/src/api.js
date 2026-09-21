@@ -41,6 +41,7 @@ export const api = {
   overview: (days) => request('GET', `/api/overview${qs({ days })}`),
   subscribers: (days) => request('GET', `/api/subscribers${qs({ days })}`),
   postsDaily: (days) => request('GET', `/api/posts/daily${qs({ days })}`),
+  sources: () => request('GET', '/api/sources'),
   posts: (params) => request('GET', `/api/posts${qs(params)}`),
   createPost: (text, mode) => request('POST', '/api/posts', { text, mode }),
   updatePost: (id, patch) => request('PATCH', `/api/posts/${id}`, patch),

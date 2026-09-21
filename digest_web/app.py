@@ -133,6 +133,10 @@ def create_app(
     def posts_daily(days: int = Query(30, ge=1, le=365)):
         return {"days": days, "daily": service.posts_daily(days)}
 
+    @app.get("/api/sources", dependencies=[Depends(require_auth)])
+    def sources():
+        return service.sources()
+
     # ---------- посты ----------
 
     @app.get("/api/posts", dependencies=[Depends(require_auth)])

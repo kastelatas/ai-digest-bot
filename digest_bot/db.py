@@ -176,6 +176,29 @@ class Database:
         with self._conn() as conn:
             conn.execute("UPDATE items SET status = ? WHERE guid = ?", (status, guid))
 
+    def source_stats(self) -> dict[str, dict]:
+        """По имени источника: сколько новостей собрано, когда последний раз, сколько черновиков и публикаций.
+
+        Ручные посты из панели (guid «manual:…») в сбор не входят.
+        """
+        stats: dict[str, dict] = {}
+        with self._conn() as conn:
+            for r in conn.execute(
+                """SELECT source_name, COUNT(*) AS fetched, MAX(fetched_at) AS last_fetched_at
+                   FROM items WHERE guid NOT LIKE 'manual:%' GROUP BY source_name"""
+            ):
+                stats[r["source_name"]] = {"fetched": r["fetched"], "last_fetched_at": r["last_fetched_at"],
+                                           "drafts": 0, "published": 0}
+            for r in conn.execute(
+                """SELECT source_name, COUNT(*) AS drafts,
+                          COALESCE(SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END), 0) AS published
+                   FROM drafts GROUP BY source_name"""
+            ):
+                row = stats.setdefault(r["source_name"], {"fetched": 0, "last_fetched_at": None,
+                                                          "drafts": 0, "published": 0})
+                row["drafts"], row["published"] = r["drafts"], r["published"]
+        return stats
+
     def recent_titles(self, hours: int) -> list[str]:
         """Заголовки за последние N часов — для fuzzy-дедупа по смыслу."""
         since = (datetime.utcnow() - timedelta(hours=hours)).isoformat()

@@ -9,6 +9,7 @@ import logging
 import re
 import uuid
 from datetime import date, datetime, timedelta, timezone, tzinfo
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from digest_bot import invite_links
@@ -166,6 +167,31 @@ class PanelService:
             "posts_total": sum(counts.values()),
             "timezone": self.cfg.channel_timezone,
         }
+
+    # ---------- источники новостей ----------
+
+    def sources(self) -> dict:
+        """Ленты из config.yaml со статистикой из БД. Удалённые из конфига источники не показываем."""
+        stats = self.db.source_stats()
+        items = []
+        for src in self.cfg.sources:
+            parts = urlsplit(src.url)
+            st = stats.get(src.name, {})
+            last = st.get("last_fetched_at")
+            items.append({
+                "name": src.name,
+                "feed_url": src.url,
+                "site_url": f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else None,
+                "lang": src.lang,
+                "category": src.category,
+                "weight": src.weight,
+                "enabled": src.enabled,
+                "fetched": st.get("fetched", 0),
+                "drafts": st.get("drafts", 0),
+                "published": st.get("published", 0),
+                "last_fetched_at": _iso_z(datetime.fromisoformat(last)) if last else None,
+            })
+        return {"items": items}
 
     # ---------- посты: чтение ----------
 

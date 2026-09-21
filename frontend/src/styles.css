@@ -210,6 +210,9 @@ td.empty { text-align: center; padding: 32px; }
 .check { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--ink); font-size: 14px; }
 .links .post-cell { min-width: 200px; max-width: 360px; }
 .links .actions { min-width: 210px; }
+.sources a { color: var(--accent); text-decoration: none; }
+.sources a:hover { text-decoration: underline; }
+.sources .post-title a { color: var(--ink); }
 .insert-link { margin-top: 6px; }
 .modal .note { margin-bottom: 12px; }
 .is-revoked { opacity: 0.6; }

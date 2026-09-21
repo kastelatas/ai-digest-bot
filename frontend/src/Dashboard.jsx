@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from './api.js';
 import { BarChart, ChartCard, LineChart } from './Charts.jsx';
+import Sources from './Sources.jsx';
 import { fmtDateTime, fmtInt, fmtSigned, parseDay, fmtDayMonth } from './format.js';
 
 const RANGES = [7, 30, 90];
@@ -124,6 +125,8 @@ export default function Dashboard() {
           <BarChart data={postBars} series={[{ key: 'published', name: 'Опубликовано', color: BLUE }]} />
         </ChartCard>
       </div>
+
+      <Sources />
     </div>
   );
 }

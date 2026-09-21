@@ -142,6 +142,42 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("пуст", resp.json()["detail"])
 
+    def test_sources_list_config_feeds_with_stats(self):
+        from datetime import datetime, timezone
+
+        from digest_bot.config import Source
+        from digest_bot.models import Draft, DraftStatus
+        from tests.helpers import make_item
+
+        cfg = make_config(channel_chat_id="@chan", sources=[
+            Source(name="Habr", url="https://habr.com/ru/rss/all/", lang="ru", category="dev_ru"),
+            Source(name="Off", url="https://off.example.com/feed", lang="en", category="x", enabled=False),
+        ])
+        client = TestClient(create_app(cfg=cfg, db=self.db, telegram=self.tg, password="pw"))
+        self.assertEqual(client.get("/api/sources").status_code, 401)
+        client.post("/api/login", json={"password": "pw"})
+
+        for i in range(3):
+            self.db.add_item(make_item(guid=f"h{i}", link=f"https://habr.com/{i}", source_name="Habr"))
+        self.db.add_item(make_item(guid="manual:1", source_name="Вручную"))  # ручные посты не считаются
+        self.db.add_item(make_item(guid="gone", source_name="Удалён из конфига"))
+        for guid, status in [("h0", DraftStatus.PUBLISHED), ("h1", DraftStatus.PENDING)]:
+            self.db.create_draft(Draft(id=None, item_guid=guid, source_name="Habr", title="t", link="",
+                                       draft_text="x", tags=[], status=status,
+                                       created_at=datetime.now(timezone.utc)))
+
+        items = {s["name"]: s for s in client.get("/api/sources").json()["items"]}
+        self.assertEqual(list(items), ["Habr", "Off"])  # только ленты из конфига, в его порядке
+        habr = items["Habr"]
+        self.assertEqual((habr["fetched"], habr["drafts"], habr["published"]), (3, 2, 1))
+        self.assertEqual((habr["feed_url"], habr["site_url"]), ("https://habr.com/ru/rss/all/", "https://habr.com"))
+        self.assertTrue(habr["enabled"])
+        self.assertIsNotNone(habr["last_fetched_at"])
+        off = items["Off"]
+        self.assertEqual((off["fetched"], off["drafts"], off["published"], off["enabled"]), (0, 0, 0, False))
+        self.assertIsNone(off["last_fetched_at"])
+        client.close()
+
     def test_links_require_login(self):
         for method, url in [("get", "/api/links"), ("get", "/api/links/1/daily"),
                             ("get", "/api/links/organic/daily"), ("post", "/api/links/1/revoke")]:
