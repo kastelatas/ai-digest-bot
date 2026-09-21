@@ -44,5 +44,6 @@ export const api = {
   posts: (params) => request('GET', `/api/posts${qs(params)}`),
   createPost: (text, mode) => request('POST', '/api/posts', { text, mode }),
   updatePost: (id, patch) => request('PATCH', `/api/posts/${id}`, patch),
+  publishPost: (id) => request('POST', `/api/posts/${id}/publish`, {}),
   deletePost: (id, force = false) => request('DELETE', `/api/posts/${id}${qs({ force: force ? 'true' : undefined })}`),
 };

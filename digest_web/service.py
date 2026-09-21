@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 MAX_TEXT_LEN = 4096  # лимит Telegram на длину сообщения
 # статусы, которые можно выставлять руками; published/failed выставляет только пайплайн
 SETTABLE_STATUSES = {DraftStatus.PENDING, DraftStatus.APPROVED, DraftStatus.NEEDS_EDIT, DraftStatus.REJECTED}
+# публиковать немедленно можно всё, что ещё не вышло и не отклонено
+PUBLISHABLE_STATUSES = {DraftStatus.PENDING, DraftStatus.APPROVED, DraftStatus.NEEDS_EDIT, DraftStatus.FAILED}
 CREATE_MODES = {"draft", "queue", "publish"}
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -217,12 +219,35 @@ class PanelService:
 
     def _publish(self, draft: Draft) -> Draft:
         telegram = self._require_telegram()
+        if self.get_post(draft.id).status == DraftStatus.PUBLISHED:
+            raise ServiceError(409, "Пост уже опубликован")
         try:
             result = telegram.send_message(self.cfg.channel_chat_id, draft.draft_text, disable_web_page_preview=False)
         except TelegramAPIError as exc:
             raise ServiceError(502, f"Telegram отказал в публикации: {exc.description}") from exc
         self.db.mark_published(draft.id, result["message_id"], datetime.now(timezone.utc))
         return self.get_post(draft.id)
+
+    def publish_post(self, post_id: int) -> dict:
+        """Опубликовать пост немедленно, не дожидаясь слота. Дневной лимит и очередь обходятся."""
+        draft = self.get_post(post_id)
+        if draft.status == DraftStatus.PUBLISHED:
+            raise ServiceError(409, "Пост уже опубликован")
+        if draft.status not in PUBLISHABLE_STATUSES:
+            raise ServiceError(409, f"Пост в статусе «{draft.status.value}» публиковать нельзя — сначала верните его в черновики или в очередь")
+        self._require_telegram()
+        published = self._publish(draft)
+        self._clear_admin_buttons(draft)
+        return self._post_dict(published)
+
+    def _clear_admin_buttons(self, draft: Draft) -> None:
+        """Убираем кнопки «Опубликовать / Отклонить» из админ-чата: пост уже вышел, нажимать поздно."""
+        if not (self.telegram and draft.admin_chat_id and draft.admin_message_id):
+            return
+        try:
+            self.telegram.edit_message_reply_markup(draft.admin_chat_id, draft.admin_message_id, reply_markup=None)
+        except TelegramAPIError:
+            logger.warning("Не удалось убрать кнопки у черновика #%s в админ-чате", draft.id)
 
     def create_post(self, text: str, mode: str) -> dict:
         if mode not in CREATE_MODES:

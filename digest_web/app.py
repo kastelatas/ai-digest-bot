@@ -135,6 +135,10 @@ def create_app(
     def update_post(post_id: int, body: UpdatePostBody):
         return service.update_post(post_id, body.text, body.status)
 
+    @app.post("/api/posts/{post_id}/publish", dependencies=[Depends(require_auth)])
+    def publish_post(post_id: int):
+        return service.publish_post(post_id)
+
     @app.delete("/api/posts/{post_id}", status_code=204, dependencies=[Depends(require_auth)])
     def delete_post(post_id: int, force: bool = False):
         service.delete_post(post_id, force)

@@ -15,6 +15,9 @@ const TRANSITIONS = {
   published: [],
 };
 
+// статусы, для которых есть кнопка «Опубликовать сейчас» (published и rejected — нет)
+const PUBLISHABLE = new Set(['pending', 'approved', 'needs_edit', 'failed']);
+
 function StatusChip({ status }) {
   return <span className={`chip status-${status}`}><span aria-hidden="true">{STATUS_ICONS[status]}</span> {STATUS_LABELS[status] || status}</span>;
 }
@@ -58,6 +61,12 @@ export default function Posts({ telegramEnabled }) {
     } catch (e) {
       setToast({ ok: false, text: e.message });
     }
+  };
+
+  const publishNow = (post) => {
+    if (!telegramEnabled) { setToast({ ok: false, text: 'На сервере не задан TELEGRAM_BOT_TOKEN — публикация недоступна' }); return; }
+    if (!window.confirm(`Опубликовать пост №${post.id} в канал прямо сейчас, не дожидаясь слота?`)) return;
+    run(() => api.publishPost(post.id), `Пост №${post.id} опубликован в канале`);
   };
 
   const remove = (post) => {
@@ -118,6 +127,9 @@ export default function Posts({ telegramEnabled }) {
                   <td className="nowrap">{fmtDateTime(p.published_at || p.created_at)}</td>
                   <td className="num">{fmtInt(p.views)}</td>
                   <td className="actions">
+                    {PUBLISHABLE.has(p.status) ? (
+                      <button type="button" className="btn small primary" onClick={() => publishNow(p)} disabled={!telegramEnabled}>Опубликовать сейчас</button>
+                    ) : null}
                     {(TRANSITIONS[p.status] || []).map(([to, label]) => (
                       <button key={to} type="button" className="btn small" onClick={() => run(() => api.updatePost(p.id, { status: to }), `Статус: ${label}`)}>{label}</button>
                     ))}

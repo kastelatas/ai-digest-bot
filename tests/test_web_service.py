@@ -214,6 +214,60 @@ class PostUpdateTests(PanelServiceBase):
         self.assertEqual(ctx.exception.status_code, 404)
 
 
+class PublishNowTests(PanelServiceBase):
+    def test_approved_post_is_published_immediately_to_channel(self):
+        pid = self._draft("g", DraftStatus.APPROVED, text="<b>Готово</b>")
+        post = self.svc.publish_post(pid)
+        self.assertEqual(post["status"], "published")
+        self.assertEqual(self.tg.sent[-1]["chat_id"], "@chan")
+        self.assertEqual(self.tg.sent[-1]["text"], "<b>Готово</b>")
+        self.assertEqual(post["channel_message_id"], self.tg.sent[-1]["message_id"])
+        self.assertEqual(self.db.approved_drafts(), [])  # из очереди ушёл — cron его не опубликует второй раз
+
+    def test_other_publishable_statuses_work_too(self):
+        for i, status in enumerate((DraftStatus.PENDING, DraftStatus.NEEDS_EDIT, DraftStatus.FAILED)):
+            pid = self._draft(f"g{i}", status)
+            self.assertEqual(self.svc.publish_post(pid)["status"], "published")
+
+    def test_daily_cap_and_queue_are_bypassed(self):
+        for i in range(self.cfg.max_posts_per_day + 2):
+            self.svc.publish_post(self._draft(f"g{i}", DraftStatus.APPROVED))
+        self.assertEqual(len(self.tg.sent), self.cfg.max_posts_per_day + 2)
+
+    def test_rejected_and_already_published_are_refused(self):
+        rejected = self._draft("r", DraftStatus.REJECTED)
+        published = self._draft("p", published_at=self.now, message_id=5)
+        for pid in (rejected, published):
+            with self.assertRaises(ServiceError) as ctx:
+                self.svc.publish_post(pid)
+            self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(self.tg.sent, [])
+
+    def test_telegram_failure_keeps_status_and_reports_502(self):
+        pid = self._draft("g", DraftStatus.APPROVED)
+        self.svc.telegram = FakeTelegramAPI(fail_send=True)
+        with self.assertRaises(ServiceError) as ctx:
+            self.svc.publish_post(pid)
+        self.assertEqual(ctx.exception.status_code, 502)
+        self.assertEqual(self.db.get_draft(pid).status, DraftStatus.APPROVED)  # останется в очереди на слот
+
+    def test_without_token_is_503(self):
+        pid = self._draft("g", DraftStatus.APPROVED)
+        with self.assertRaises(ServiceError) as ctx:
+            PanelService(self.cfg, self.db, None).publish_post(pid)
+        self.assertEqual(ctx.exception.status_code, 503)
+
+    def test_admin_chat_buttons_are_removed_after_publishing(self):
+        pid = self._draft("g", DraftStatus.PENDING, admin=(111, 42))
+        self.svc.publish_post(pid)
+        self.assertEqual([(m["chat_id"], m["message_id"]) for m in self.tg.edited_markup], [(111, 42)])
+
+    def test_missing_post_is_404(self):
+        with self.assertRaises(ServiceError) as ctx:
+            self.svc.publish_post(999)
+        self.assertEqual(ctx.exception.status_code, 404)
+
+
 class PostDeleteTests(PanelServiceBase):
     def test_delete_draft_removes_row_and_admin_message_but_keeps_item(self):
         pid = self._draft("g", admin=(111, 42))

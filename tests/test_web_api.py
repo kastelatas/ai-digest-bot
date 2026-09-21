@@ -123,6 +123,18 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(self.client.delete(f"/api/posts/{post['id']}").status_code, 204)
         self.assertEqual(self.tg.deleted[-1], ("@chan", post["channel_message_id"]))
 
+    def test_publish_now_endpoint(self):
+        self.assertEqual(self.client.post("/api/posts/1/publish").status_code, 401)
+        self._login()
+        pid = self.client.post("/api/posts", json={"text": "В очередь", "mode": "queue"}).json()["id"]
+        resp = self.client.post(f"/api/posts/{pid}/publish")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["status"], "published")
+        self.assertEqual(len(self.tg.sent), 1)
+        self.assertEqual(self.client.post(f"/api/posts/{pid}/publish").status_code, 409)  # повторно нельзя
+        self.assertEqual(self.client.post("/api/posts/999/publish").status_code, 404)
+        self.assertEqual(len(self.tg.sent), 1)
+
     def test_validation_errors_are_json_with_detail(self):
         self._login()
         resp = self.client.post("/api/posts", json={"text": "  ", "mode": "draft"})
