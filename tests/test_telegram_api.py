@@ -69,6 +69,30 @@ class TelegramAPITests(unittest.TestCase):
         self.assertEqual(sent_json["timeout"], 5)
 
 
+    def test_get_updates_passes_allowed_updates_only_when_given(self):
+        session = _fake_session_returning({"ok": True, "result": []})
+        api = TelegramAPI(bot_token="t", session=session)
+        api.get_updates()
+        self.assertNotIn("allowed_updates", session.post.call_args.kwargs["json"])
+        api.get_updates(allowed_updates=["callback_query", "chat_member"])
+        self.assertEqual(session.post.call_args.kwargs["json"]["allowed_updates"], ["callback_query", "chat_member"])
+
+    def test_create_invite_link_truncates_name_to_telegram_limit(self):
+        session = _fake_session_returning({"ok": True, "result": {"invite_link": "https://t.me/+abc"}})
+        api = TelegramAPI(bot_token="t", session=session)
+        result = api.create_chat_invite_link("@chan", name="x" * 50)
+        self.assertEqual(result["invite_link"], "https://t.me/+abc")
+        self.assertIn("createChatInviteLink", session.post.call_args.args[0])
+        self.assertEqual(session.post.call_args.kwargs["json"], {"chat_id": "@chan", "name": "x" * 32})
+
+    def test_revoke_invite_link_sends_link(self):
+        session = _fake_session_returning({"ok": True, "result": {"is_revoked": True}})
+        api = TelegramAPI(bot_token="t", session=session)
+        api.revoke_chat_invite_link("@chan", "https://t.me/+abc")
+        self.assertIn("revokeChatInviteLink", session.post.call_args.args[0])
+        self.assertEqual(session.post.call_args.kwargs["json"]["invite_link"], "https://t.me/+abc")
+
+
 class ApproveRejectKeyboardTests(unittest.TestCase):
     def test_callback_data_encodes_draft_id(self):
         kb = approve_reject_keyboard(draft_id=42)

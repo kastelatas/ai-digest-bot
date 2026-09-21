@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
 import { sanitizeTelegramHtml } from './sanitize.js';
 
@@ -16,8 +16,25 @@ export default function PostEditor({ post, telegramEnabled, onClose, onSaved }) 
   const [mode, setMode] = useState('draft');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [links, setLinks] = useState([]);
+  const textRef = useRef(null);
   const preview = useMemo(() => sanitizeTelegramHtml(text), [text]);
   const tooLong = text.length > LIMIT;
+
+  // активные ссылки-приглашения — их можно вставить в текст одним выбором
+  useEffect(() => {
+    api.links().then((d) => setLinks(d.items.filter((l) => l.status === 'active'))).catch(() => {});
+  }, []);
+
+  const insertLink = (id) => {
+    const link = links.find((l) => String(l.id) === id);
+    if (!link) return;
+    const html = `<a href="${link.url}">Подписаться</a>`;
+    const el = textRef.current;
+    const at = el ? [el.selectionStart, el.selectionEnd] : [text.length, text.length];
+    setText(text.slice(0, at[0]) + html + text.slice(at[1]));
+    if (el) el.focus();
+  };
 
   const save = async () => {
     if (!editing && mode === 'publish' && !window.confirm('Опубликовать пост в канал прямо сейчас?')) return;
@@ -49,7 +66,13 @@ export default function PostEditor({ post, telegramEnabled, onClose, onSaved }) 
         <div className="editor-grid">
           <div>
             <label htmlFor="post-text">Текст (Telegram-HTML: &lt;b&gt;, &lt;i&gt;, &lt;a href&gt;, &lt;code&gt;)</label>
-            <textarea id="post-text" rows={14} value={text} onChange={(e) => setText(e.target.value)} autoFocus />
+            <textarea id="post-text" ref={textRef} rows={14} value={text} onChange={(e) => setText(e.target.value)} autoFocus />
+            {links.length ? (
+              <select className="insert-link" value="" onChange={(e) => insertLink(e.target.value)} aria-label="Вставить ссылку-приглашение">
+                <option value="">＋ Вставить ссылку-приглашение…</option>
+                {links.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            ) : null}
             <div className={`counter${tooLong ? ' over' : ''}`}>{text.length} / {LIMIT}</div>
           </div>
           <div>

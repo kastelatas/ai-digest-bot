@@ -11,9 +11,11 @@ import uuid
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from digest_bot import invite_links
 from digest_bot.config import Config
 from digest_bot.db import Database
 from digest_bot.models import Draft, DraftStatus, FeedItem
+from digest_bot.moderation import JOINS_SINCE_KEY
 from digest_bot.telegram_api import TelegramAPI, TelegramAPIError
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,8 @@ SETTABLE_STATUSES = {DraftStatus.PENDING, DraftStatus.APPROVED, DraftStatus.NEED
 PUBLISHABLE_STATUSES = {DraftStatus.PENDING, DraftStatus.APPROVED, DraftStatus.NEEDS_EDIT, DraftStatus.FAILED}
 CREATE_MODES = {"draft", "queue", "publish"}
 _TAG_RE = re.compile(r"<[^>]+>")
+MAX_NOTES_LEN = 1000
+_CURRENCY_RE = re.compile(r"^[A-Za-z]{3}$")
 
 
 class ServiceError(Exception):
@@ -323,3 +327,134 @@ class PanelService:
             # убираем сообщение с кнопками из админ-чата, чтобы на удалённый черновик нельзя было нажать
             self.telegram.delete_message(draft.admin_chat_id, draft.admin_message_id)
         self.db.delete_draft(post_id)
+
+    # ---------- ссылки-приглашения ----------
+
+    @staticmethod
+    def _clean_link_fields(fields: dict) -> dict:
+        """Проверка и нормализация полей ссылки; на вход только реально переданные ключи."""
+        out = dict(fields)
+        if "name" in out:
+            out["name"] = (out["name"] or "").strip()
+            if not out["name"]:
+                raise ServiceError(400, "Название ссылки пусто")
+            if len(out["name"]) > invite_links.NAME_MAX:
+                raise ServiceError(400, f"Название длиннее {invite_links.NAME_MAX} символов")
+        if out.get("cost") is not None and out["cost"] < 0:
+            raise ServiceError(400, "Цена не может быть отрицательной")
+        if "currency" in out:
+            if not _CURRENCY_RE.match(out["currency"] or ""):
+                raise ServiceError(400, "Валюта — трёхбуквенный код, например USD")
+            out["currency"] = out["currency"].upper()
+        if len(out.get("ad_text") or "") > MAX_TEXT_LEN:
+            raise ServiceError(400, f"Текст рекламы длиннее {MAX_TEXT_LEN} символов")
+        if len(out.get("notes") or "") > MAX_NOTES_LEN:
+            raise ServiceError(400, f"Заметка длиннее {MAX_NOTES_LEN} символов")
+        return out
+
+    def _link_dict(self, row: dict) -> dict:
+        joined, left = row["joined"], row["left_count"]
+        retained = joined - left
+        cost = row["cost"]
+
+        def per(divisor: int) -> float | None:
+            return round(cost / divisor, 2) if cost is not None and divisor else None
+
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "url": row["url"],
+            "status": row["status"],
+            "cost": cost,
+            "currency": row["currency"],
+            "ad_text": row["ad_text"],
+            "notes": row["notes"],
+            "created_at": _iso_z(datetime.fromisoformat(row["created_at"])),
+            "revoked_at": _iso_z(datetime.fromisoformat(row["revoked_at"])) if row["revoked_at"] else None,
+            "joined": joined,
+            "left": left,
+            "retained": retained,
+            "retention_pct": round(retained / joined * 100) if joined else None,
+            "joined_24h": row["joined_24h"],
+            "last_join_at": _iso_z(datetime.fromisoformat(row["last_join_at"])) if row["last_join_at"] else None,
+            "cost_per_join": per(joined),
+            "cost_per_retained": per(retained),
+        }
+
+    def _get_link_row(self, link_id: int) -> dict:
+        row = self.db.get_invite_link(link_id)
+        if row is None:
+            raise ServiceError(404, "Ссылка не найдена")
+        return row
+
+    def _link_by_id(self, link_id: int) -> dict:
+        """Ссылка вместе со статистикой (та же форма, что в списке)."""
+        self._get_link_row(link_id)
+        since = datetime.utcnow() - timedelta(hours=24)
+        return next(self._link_dict(r) for r in self.db.invite_links_with_stats(since) if r["id"] == link_id)
+
+    def list_links(self) -> dict:
+        since = datetime.utcnow() - timedelta(hours=24)
+        organic = self.db.untracked_join_stats()
+        tracking_since = self.db.get_state(JOINS_SINCE_KEY)
+        return {
+            "items": [self._link_dict(r) for r in self.db.invite_links_with_stats(since)],
+            "organic": {
+                "joined": organic["joined"],
+                "left": organic["left_count"],
+                "retained": organic["joined"] - organic["left_count"],
+            },
+            "tracking_since": _iso_z(datetime.fromisoformat(tracking_since)) if tracking_since else None,
+        }
+
+    def create_link(self, name: str, ad_text: str = "", cost: float | None = None,
+                    currency: str | None = None, notes: str = "") -> dict:
+        fields = self._clean_link_fields({"name": name, "ad_text": ad_text, "cost": cost,
+                                          "currency": currency or self.cfg.ads_currency, "notes": notes})
+        telegram = self._require_telegram()
+        try:
+            link = invite_links.create_link(self.cfg, self.db, telegram, fields["name"], ad_text=fields["ad_text"],
+                                            cost=fields["cost"], currency=fields["currency"], notes=fields["notes"])
+        except TelegramAPIError as exc:
+            raise ServiceError(
+                502,
+                f"Telegram отказал создать ссылку: {exc.description}. Бот должен быть админом канала "
+                "с правом «Приглашать пользователей по ссылкам».",
+            ) from exc
+        return self._link_by_id(link["id"])
+
+    def update_link(self, link_id: int, fields: dict) -> dict:
+        """Правит только локальные данные (название, цена, текст, заметка) — ссылка в Telegram не меняется."""
+        self._get_link_row(link_id)
+        self.db.update_invite_link(link_id, **self._clean_link_fields(fields))
+        return self._link_by_id(link_id)
+
+    def revoke_link(self, link_id: int, force: bool = False) -> dict:
+        """Отзывает ссылку: новые вступления по ней прекращаются, накопленная статистика остаётся.
+        force — пометить отозванной только в панели (например, если ссылку уже отозвали в Telegram руками)."""
+        link = self._get_link_row(link_id)
+        if link["status"] == "revoked":
+            raise ServiceError(409, "Ссылка уже отозвана")
+        try:
+            invite_links.revoke_link(self.cfg, self.db, None if force else self._require_telegram(), link_id)
+        except TelegramAPIError as exc:
+            raise ServiceError(502, f"Telegram отказал отозвать ссылку: {exc.description}") from exc
+        return self._link_by_id(link_id)
+
+    def link_daily(self, link_id: int | None, days: int = 30) -> dict:
+        """Вступления и выходы по дням. link_id=None — те, кто пришёл не по нашим ссылкам."""
+        link = self._link_by_id(link_id) if link_id is not None else None
+        first_day, last_day = self._window(days)
+        joined: dict[date, int] = {}
+        left: dict[date, int] = {}
+        for row in self.db.join_rows(link_id):
+            day = self._local_date(datetime.fromisoformat(row["joined_at"]))
+            joined[day] = joined.get(day, 0) + 1
+            if row["left_at"]:
+                day = self._local_date(datetime.fromisoformat(row["left_at"]))
+                left[day] = left.get(day, 0) + 1
+        daily, d = [], first_day
+        while d <= last_day:
+            daily.append({"date": d.isoformat(), "joined": joined.get(d, 0), "left": left.get(d, 0)})
+            d += timedelta(days=1)
+        return {"days": days, "link": link, "daily": daily}

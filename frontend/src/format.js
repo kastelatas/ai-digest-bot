@@ -21,3 +21,34 @@ export const STATUS_LABELS = {
   failed: 'Ошибка',
 };
 export const STATUS_ICONS = { pending: '◷', approved: '➜', needs_edit: '✎', rejected: '✕', published: '✓', failed: '!' };
+
+export const fmtMoney = (value, currency) => (value === null || value === undefined ? '—' : `${nf.format(value)} ${currency}`);
+
+export const LINK_STATUS_LABELS = { active: 'Активна', revoked: 'Отозвана' };
+
+// Текст рекламного поста для копирования: {link} заменяется на ссылку, без плейсхолдера ссылка идёт последней строкой.
+export function renderAdText(text, url) {
+  const body = (text || '').trim();
+  if (!body) return url;
+  return body.includes('{link}') ? body.split('{link}').join(url) : `${body}\n\n${url}`;
+}
+
+export async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // http-страница или запрет доступа к буферу — запасной путь через выделение
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.setAttribute('readonly', '');
+    el.style.position = 'fixed';
+    el.style.opacity = '0';
+    document.body.appendChild(el);
+    el.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { /* нечем копировать */ }
+    document.body.removeChild(el);
+    return ok;
+  }
+}

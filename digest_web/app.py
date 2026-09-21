@@ -40,6 +40,22 @@ class UpdatePostBody(BaseModel):
     status: str | None = None
 
 
+class CreateLinkBody(BaseModel):
+    name: str
+    ad_text: str = ""
+    cost: float | None = None
+    currency: str | None = None
+    notes: str = ""
+
+
+class UpdateLinkBody(BaseModel):
+    name: str | None = None
+    ad_text: str | None = None
+    cost: float | None = None
+    currency: str | None = None
+    notes: str | None = None
+
+
 def create_app(
     cfg: Config | None = None,
     db: Database | None = None,
@@ -100,6 +116,7 @@ def create_app(
             "telegram_enabled": telegram is not None,
             "channel": cfg.channel_chat_id,
             "timezone": cfg.channel_timezone,
+            "currency": cfg.ads_currency,
         }
 
     # ---------- метрики ----------
@@ -143,6 +160,36 @@ def create_app(
     def delete_post(post_id: int, force: bool = False):
         service.delete_post(post_id, force)
         return Response(status_code=204)
+
+    # ---------- ссылки-приглашения ----------
+
+    @app.get("/api/links", dependencies=[Depends(require_auth)])
+    def list_links():
+        return service.list_links()
+
+    @app.post("/api/links", status_code=201, dependencies=[Depends(require_auth)])
+    def create_link(body: CreateLinkBody):
+        return service.create_link(body.name, body.ad_text, body.cost, body.currency, body.notes)
+
+    # маршрут «organic» объявлен раньше {link_id}, иначе слово попало бы в int-параметр
+    @app.get("/api/links/organic/daily", dependencies=[Depends(require_auth)])
+    def organic_daily(days: int = Query(30, ge=1, le=365)):
+        return service.link_daily(None, days)
+
+    @app.get("/api/links/{link_id}/daily", dependencies=[Depends(require_auth)])
+    def link_daily(link_id: int, days: int = Query(30, ge=1, le=365)):
+        return service.link_daily(link_id, days)
+
+    @app.patch("/api/links/{link_id}", dependencies=[Depends(require_auth)])
+    def update_link(link_id: int, body: UpdateLinkBody):
+        fields = body.model_dump(exclude_unset=True)
+        # None допустим только для цены (очистить); у остальных полей «не передано» = «не менять»
+        fields = {k: v for k, v in fields.items() if v is not None or k == "cost"}
+        return service.update_link(link_id, fields)
+
+    @app.post("/api/links/{link_id}/revoke", dependencies=[Depends(require_auth)])
+    def revoke_link(link_id: int, force: bool = False):
+        return service.revoke_link(link_id, force)
 
     # ---------- фронтенд ----------
 

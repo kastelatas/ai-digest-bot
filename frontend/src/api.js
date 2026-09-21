@@ -46,4 +46,10 @@ export const api = {
   updatePost: (id, patch) => request('PATCH', `/api/posts/${id}`, patch),
   publishPost: (id) => request('POST', `/api/posts/${id}/publish`, {}),
   deletePost: (id, force = false) => request('DELETE', `/api/posts/${id}${qs({ force: force ? 'true' : undefined })}`),
+  links: () => request('GET', '/api/links'),
+  createLink: (body) => request('POST', '/api/links', body),
+  updateLink: (id, patch) => request('PATCH', `/api/links/${id}`, patch),
+  revokeLink: (id, force = false) => request('POST', `/api/links/${id}/revoke${qs({ force: force ? 'true' : undefined })}`, {}),
+  // id === null — вступления не по нашим ссылкам
+  linkDaily: (id, days) => request('GET', `/api/links/${id === null ? 'organic' : id}/daily${qs({ days })}`),
 };

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, setUnauthorizedHandler } from './api.js';
 import Dashboard from './Dashboard.jsx';
+import Links from './Links.jsx';
 import Login from './Login.jsx';
 import Posts from './Posts.jsx';
 
@@ -44,6 +45,7 @@ export default function App() {
         <nav className="tabs" aria-label="Разделы">
           <button type="button" className={`tab${tab === 'metrics' ? ' is-active' : ''}`} aria-current={tab === 'metrics' ? 'page' : undefined} onClick={() => setTab('metrics')}>Метрики</button>
           <button type="button" className={`tab${tab === 'posts' ? ' is-active' : ''}`} aria-current={tab === 'posts' ? 'page' : undefined} onClick={() => setTab('posts')}>Посты</button>
+          <button type="button" className={`tab${tab === 'links' ? ' is-active' : ''}`} aria-current={tab === 'links' ? 'page' : undefined} onClick={() => setTab('links')}>Ссылки</button>
         </nav>
         <div className="topbar-right">
           <select value={theme} onChange={(e) => setTheme(e.target.value)} aria-label="Тема оформления">
@@ -53,7 +55,9 @@ export default function App() {
         </div>
       </header>
       <main className="content">
-        {tab === 'metrics' ? <Dashboard /> : <Posts telegramEnabled={me.telegram_enabled} />}
+        {tab === 'metrics' ? <Dashboard />
+          : tab === 'posts' ? <Posts telegramEnabled={me.telegram_enabled} />
+            : <Links telegramEnabled={me.telegram_enabled} defaultCurrency={me.currency} />}
       </main>
     </div>
   );

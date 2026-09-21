@@ -9,17 +9,20 @@
     python cli.py ads-check          # снять рекламные посты, которым пора выйти
     python cli.py weekly-report      # собрать и отправить недельный отчёт в админ-чат
     python cli.py book-ad ...        # добавить рекламное бронирование
+    python cli.py make-link ...      # создать ссылку-приглашение для закупа рекламы
+    python cli.py link-stats         # вступления по каждой ссылке-приглашению
 """
 from __future__ import annotations
 
 import argparse
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 
 from digest_bot import ads as ads_mod
+from digest_bot import invite_links as links_mod
 from digest_bot import metrics as metrics_mod
 from digest_bot import moderation as moderation_mod
 from digest_bot import publish as publish_mod
@@ -68,8 +71,9 @@ def cmd_moderate(args) -> int:
         return 1
     stats = moderation_mod.process_admin_updates(cfg, db, telegram)
     logger.info(
-        "moderate: обработано=%s одобрено=%s отклонено=%s правки=%s без_прав=%s",
+        "moderate: обработано=%s одобрено=%s отклонено=%s правки=%s без_прав=%s вступлений=%s выходов=%s",
         stats.processed, stats.approved, stats.rejected, stats.needs_edit, stats.ignored_unauthorized,
+        stats.joins, stats.leaves,
     )
     return 0
 
@@ -156,6 +160,32 @@ def cmd_book_ad(args) -> int:
     return 0
 
 
+def cmd_make_link(args) -> int:
+    cfg, db, telegram = _build_context(args)
+    if telegram is None:
+        logger.error("TELEGRAM_BOT_TOKEN не задан")
+        return 1
+    link = links_mod.create_link(
+        cfg, db, telegram, args.name, ad_text=args.text or "", cost=args.cost,
+        currency=args.currency, notes=args.notes or "",
+    )
+    logger.info("make-link: ссылка #%s «%s»", link["id"], link["name"])
+    print(link["url"])
+    return 0
+
+
+def cmd_link_stats(args) -> int:
+    cfg, db, _ = _build_context(args)
+    rows = db.invite_links_with_stats(datetime.utcnow() - timedelta(hours=24))
+    print(f"{'#':>3}  {'Название':<32} {'Статус':<8} {'Вступило':>8} {'Ушло':>5} {'За 24ч':>6}  Цена подписчика")
+    for r in rows:
+        per = f"{r['cost'] / r['joined']:.2f} {r['currency']}" if r["cost"] is not None and r["joined"] else "—"
+        print(f"{r['id']:>3}  {r['name'][:32]:<32} {r['status']:<8} {r['joined']:>8} {r['left_count']:>5} {r['joined_24h']:>6}  {per}")
+    organic = db.untracked_join_stats()
+    print(f"     не по нашим ссылкам: вступило {organic['joined']}, ушло {organic['left_count']}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=None, help="путь к config.yaml (по умолчанию ./config.yaml)")
@@ -187,6 +217,16 @@ def main(argv: list[str] | None = None) -> int:
     p_ad.add_argument("--erid", default="")
     p_ad.add_argument("--notes", default="")
     p_ad.set_defaults(func=cmd_book_ad)
+
+    p_link = sub.add_parser("make-link", help="создать ссылку-приглашение для закупа")
+    p_link.add_argument("--name", required=True, help="например: seed_habr_2026-10 (в Telegram уйдут первые 32 символа)")
+    p_link.add_argument("--cost", type=float, default=None, help="во сколько обошёлся закуп")
+    p_link.add_argument("--currency", default=None, help="по умолчанию ads.currency из config.yaml")
+    p_link.add_argument("--text", default="", help="текст рекламного поста; {link} заменится на ссылку")
+    p_link.add_argument("--notes", default="")
+    p_link.set_defaults(func=cmd_make_link)
+
+    sub.add_parser("link-stats", help="вступления по каждой ссылке").set_defaults(func=cmd_link_stats)
 
     args = parser.parse_args(argv)
     return args.func(args)

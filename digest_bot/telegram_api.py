@@ -115,8 +115,22 @@ class TelegramAPI:
         result = self._call("getChatMemberCount", {"chat_id": chat_id})
         return int(result)
 
-    def get_updates(self, offset: int | None = None, timeout: int = 25) -> list[dict]:
+    def get_updates(
+        self, offset: int | None = None, timeout: int = 25, allowed_updates: list[str] | None = None
+    ) -> list[dict]:
         payload: dict[str, Any] = {"timeout": timeout}
         if offset is not None:
             payload["offset"] = offset
+        if allowed_updates is not None:
+            payload["allowed_updates"] = allowed_updates
         return self._call("getUpdates", payload)
+
+    def create_chat_invite_link(self, chat_id: str | int, name: str | None = None) -> dict:
+        """Новая ссылка-приглашение. name (до 32 символов) видно только админам канала."""
+        payload: dict[str, Any] = {"chat_id": chat_id}
+        if name:
+            payload["name"] = name[:32]
+        return self._call("createChatInviteLink", payload)
+
+    def revoke_chat_invite_link(self, chat_id: str | int, invite_link: str) -> dict:
+        return self._call("revokeChatInviteLink", {"chat_id": chat_id, "invite_link": invite_link})

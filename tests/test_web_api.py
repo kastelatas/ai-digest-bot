@@ -1,4 +1,5 @@
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -140,6 +141,88 @@ class WebApiTests(unittest.TestCase):
         resp = self.client.post("/api/posts", json={"text": "  ", "mode": "draft"})
         self.assertEqual(resp.status_code, 400)
         self.assertIn("пуст", resp.json()["detail"])
+
+    def test_links_require_login(self):
+        for method, url in [("get", "/api/links"), ("get", "/api/links/1/daily"),
+                            ("get", "/api/links/organic/daily"), ("post", "/api/links/1/revoke")]:
+            self.assertEqual(getattr(self.client, method)(url).status_code, 401, url)
+        self.assertEqual(self.client.post("/api/links", json={"name": "x"}).status_code, 401)
+        self.assertEqual(self.client.patch("/api/links/1", json={"name": "x"}).status_code, 401)
+
+    def test_link_flow_create_stats_edit_revoke(self):
+        from digest_bot.moderation import process_admin_updates
+
+        self._login()
+        created = self.client.post("/api/links", json={
+            "name": "seed_habr", "cost": 100, "currency": "usd", "ad_text": "Заходи: {link}",
+        })
+        self.assertEqual(created.status_code, 201)
+        link = created.json()
+        self.assertEqual((link["joined"], link["currency"], link["status"]), (0, "USD", "active"))
+        self.assertEqual(self.tg.invite_links[0]["chat_id"], "@chan")
+
+        now = int(time.time())
+        self.tg.queue_chat_member(1, joined=True, chat_username="chan", invite_link=link["url"], date=now)
+        self.tg.queue_chat_member(2, joined=True, chat_username="chan", invite_link=link["url"], date=now)
+        self.tg.queue_chat_member(3, joined=True, chat_username="chan", date=now)
+        self.tg.queue_chat_member(2, joined=False, chat_username="chan", date=now)
+        process_admin_updates(make_config(channel_chat_id="@chan"), self.db, self.tg)
+
+        listed = self.client.get("/api/links").json()
+        item = listed["items"][0]
+        self.assertEqual((item["joined"], item["left"], item["retained"], item["retention_pct"]), (2, 1, 1, 50))
+        self.assertEqual((item["cost_per_join"], item["cost_per_retained"]), (50.0, 100.0))
+        self.assertEqual(listed["organic"], {"joined": 1, "left": 0, "retained": 1})
+        self.assertIsNotNone(listed["tracking_since"])
+
+        daily = self.client.get(f"/api/links/{link['id']}/daily?days=7").json()
+        self.assertEqual(len(daily["daily"]), 7)
+        self.assertEqual({k: daily["daily"][-1][k] for k in ("joined", "left")}, {"joined": 2, "left": 1})
+        self.assertEqual(sum(r["joined"] for r in daily["daily"][:-1]), 0)
+        self.assertEqual(daily["link"]["id"], link["id"])
+        organic = self.client.get("/api/links/organic/daily?days=7").json()
+        self.assertIsNone(organic["link"])
+        self.assertEqual(organic["daily"][-1]["joined"], 1)
+
+        patched = self.client.patch(f"/api/links/{link['id']}", json={"name": "seed_dou", "cost": None}).json()
+        self.assertEqual((patched["name"], patched["cost"], patched["ad_text"]), ("seed_dou", None, "Заходи: {link}"))
+        self.assertIsNone(patched["cost_per_join"])
+
+        revoked = self.client.post(f"/api/links/{link['id']}/revoke").json()
+        self.assertEqual(revoked["status"], "revoked")
+        self.assertEqual(self.tg.revoked_links, [link["url"]])
+        self.assertEqual(self.client.post(f"/api/links/{link['id']}/revoke").status_code, 409)
+
+    def test_link_validation_and_errors(self):
+        self._login()
+        self.assertEqual(self.client.post("/api/links", json={"name": "  "}).status_code, 400)
+        self.assertEqual(self.client.post("/api/links", json={"name": "x" * 65}).status_code, 400)
+        self.assertEqual(self.client.post("/api/links", json={"name": "x", "cost": -1}).status_code, 400)
+        self.assertEqual(self.client.post("/api/links", json={"name": "x", "currency": "dollars"}).status_code, 400)
+        self.assertEqual(self.client.get("/api/links/999/daily").status_code, 404)
+        self.assertEqual(self.client.patch("/api/links/999", json={"name": "x"}).status_code, 404)
+        self.assertEqual(self.client.post("/api/links/999/revoke").status_code, 404)
+        self.assertEqual(self.client.get("/api/links").json()["items"], [])
+
+    def test_telegram_refusal_gives_502_with_hint_and_saves_nothing(self):
+        client = TestClient(create_app(cfg=make_config(channel_chat_id="@chan"), db=self.db,
+                                       telegram=FakeTelegramAPI(fail_invite=True), password="pw"))
+        client.post("/api/login", json={"password": "pw"})
+        resp = client.post("/api/links", json={"name": "x"})
+        self.assertEqual(resp.status_code, 502)
+        self.assertIn("Приглашать пользователей", resp.json()["detail"])
+        self.assertEqual(client.get("/api/links").json()["items"], [])
+        client.close()
+
+    def test_forced_revoke_marks_link_in_panel_when_telegram_refuses(self):
+        self._login()
+        link = self.client.post("/api/links", json={"name": "x"}).json()
+        failing = TestClient(create_app(cfg=make_config(channel_chat_id="@chan"), db=self.db,
+                                        telegram=FakeTelegramAPI(fail_invite=True), password="pw"))
+        failing.post("/api/login", json={"password": "pw"})
+        self.assertEqual(failing.post(f"/api/links/{link['id']}/revoke").status_code, 502)
+        self.assertEqual(failing.post(f"/api/links/{link['id']}/revoke?force=true").json()["status"], "revoked")
+        failing.close()
 
     def test_spa_fallback_serves_index_but_not_for_api_paths(self):
         static = Path(self._tmp.name) / "static"

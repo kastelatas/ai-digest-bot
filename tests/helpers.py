@@ -94,7 +94,7 @@ class FakeTelegramAPI:
     """
 
     def __init__(self, subscriber_count: int = 1000, fail_send: bool = False,
-                 fail_delete: bool = False, edit_error: str | None = None):
+                 fail_delete: bool = False, edit_error: str | None = None, fail_invite: bool = False):
         self._next_message_id = 1000
         self.sent: list[dict] = []
         self.edited_text: list[dict] = []
@@ -107,6 +107,10 @@ class FakeTelegramAPI:
         self.fail_send = fail_send
         self.fail_delete = fail_delete
         self.edit_error = edit_error
+        self.fail_invite = fail_invite
+        self.invite_links: list[dict] = []
+        self.revoked_links: list[str] = []
+        self.last_allowed_updates: list[str] | None = None
 
     # ---- запись ----
 
@@ -141,7 +145,21 @@ class FakeTelegramAPI:
     def get_chat_member_count(self, chat_id):
         return self.subscriber_count
 
-    def get_updates(self, offset=None, timeout=25):
+    def create_chat_invite_link(self, chat_id, name=None):
+        if self.fail_invite:
+            raise TelegramAPIError("createChatInviteLink", "not enough rights to manage chat invite link", 400)
+        url = f"https://t.me/+fake{len(self.invite_links) + 1}"
+        self.invite_links.append({"chat_id": chat_id, "name": name, "invite_link": url})
+        return {"invite_link": url, "name": name}
+
+    def revoke_chat_invite_link(self, chat_id, invite_link):
+        if self.fail_invite:
+            raise TelegramAPIError("revokeChatInviteLink", "invite link not found", 400)
+        self.revoked_links.append(invite_link)
+        return {"invite_link": invite_link, "is_revoked": True}
+
+    def get_updates(self, offset=None, timeout=25, allowed_updates=None):
+        self.last_allowed_updates = allowed_updates
         updates = self._pending_updates
         self._pending_updates = []
         return updates
@@ -161,6 +179,25 @@ class FakeTelegramAPI:
                 },
             }
         )
+
+    def queue_chat_member(self, user_id: int, joined: bool, chat_username="test_channel", invite_link=None,
+                          date=1_780_000_000):
+        """Апдейт chat_member: joined=True — вступление (по invite_link, если задан), False — выход."""
+        self._next_update_id += 1
+
+        def member(status):
+            return {"status": status, "user": {"id": user_id, "is_bot": False}}
+
+        event = {
+            "chat": {"id": -100123, "type": "channel", "username": chat_username},
+            "from": {"id": user_id},
+            "date": date,
+            "old_chat_member": member("left" if joined else "member"),
+            "new_chat_member": member("member" if joined else "left"),
+        }
+        if invite_link:
+            event["invite_link"] = {"invite_link": invite_link, "creator": {"id": 1}}
+        self._pending_updates.append({"update_id": self._next_update_id, "chat_member": event})
 
     def last_sent_to(self, chat_id):
         matches = [m for m in self.sent if m["chat_id"] == chat_id]

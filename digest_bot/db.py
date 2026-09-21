@@ -76,11 +76,38 @@ CREATE TABLE IF NOT EXISTS ads (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS invite_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL UNIQUE,
+    cost REAL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    ad_text TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    revoked_at TEXT
+);
+
+-- Каждое вступление в канал, о котором сообщил Telegram (update chat_member).
+-- link_id пуст, если человек пришёл не по нашей ссылке (поиск, @username, чужая ссылка).
+CREATE TABLE IF NOT EXISTS link_joins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    update_id INTEGER UNIQUE,
+    link_id INTEGER REFERENCES invite_links(id),
+    invite_link TEXT,
+    user_id INTEGER NOT NULL,
+    joined_at TEXT NOT NULL,
+    left_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS kv_state (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_link_joins_link ON link_joins(link_id);
+CREATE INDEX IF NOT EXISTS idx_link_joins_user ON link_joins(user_id, left_at);
 CREATE INDEX IF NOT EXISTS idx_drafts_status ON drafts(status);
 CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
 CREATE INDEX IF NOT EXISTS idx_ads_status ON ads(status);
@@ -397,6 +424,107 @@ class Database:
                 (_iso(start), _iso(end)),
             ).fetchall()
             return [self._row_to_ad(r) for r in rows]
+
+    # ---------- ссылки-приглашения и вступления по ним ----------
+
+    _LINK_EDITABLE = {"name", "cost", "currency", "ad_text", "notes"}
+
+    def add_invite_link(
+        self, name: str, url: str, cost: float | None = None, currency: str = "USD",
+        ad_text: str = "", notes: str = "",
+    ) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO invite_links (name, url, cost, currency, ad_text, notes, status, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'active', ?)""",
+                (name, url, cost, currency, ad_text, notes, datetime.utcnow().isoformat()),
+            )
+            return cur.lastrowid
+
+    def get_invite_link(self, link_id: int) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM invite_links WHERE id = ?", (link_id,)).fetchone()
+            return dict(row) if row else None
+
+    def get_invite_link_by_url(self, url: str) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM invite_links WHERE url = ?", (url,)).fetchone()
+            return dict(row) if row else None
+
+    def update_invite_link(self, link_id: int, **fields) -> None:
+        fields = {k: v for k, v in fields.items() if k in self._LINK_EDITABLE}
+        if not fields:
+            return
+        assignments = ", ".join(f"{k} = ?" for k in fields)
+        with self._conn() as conn:
+            conn.execute(f"UPDATE invite_links SET {assignments} WHERE id = ?", [*fields.values(), link_id])
+
+    def mark_invite_link_revoked(self, link_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE invite_links SET status = 'revoked', revoked_at = ? WHERE id = ?",
+                (datetime.utcnow().isoformat(), link_id),
+            )
+
+    def invite_links_with_stats(self, since_24h: datetime) -> list[dict]:
+        """Все ссылки (новые первыми) с числом вступивших / ушедших и вступлений за 24 часа."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT l.*,
+                          COUNT(j.id) AS joined,
+                          COALESCE(SUM(CASE WHEN j.left_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS left_count,
+                          COALESCE(SUM(CASE WHEN j.joined_at >= ? THEN 1 ELSE 0 END), 0) AS joined_24h,
+                          MAX(j.joined_at) AS last_join_at
+                   FROM invite_links l LEFT JOIN link_joins j ON j.link_id = l.id
+                   GROUP BY l.id ORDER BY l.id DESC""",
+                (since_24h.isoformat(),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def untracked_join_stats(self) -> dict:
+        """Вступления не по нашим ссылкам: поиск, @username, чужие ссылки."""
+        with self._conn() as conn:
+            row = conn.execute(
+                """SELECT COUNT(*) AS joined,
+                          COALESCE(SUM(CASE WHEN left_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS left_count
+                   FROM link_joins WHERE link_id IS NULL"""
+            ).fetchone()
+            return dict(row)
+
+    def join_rows(self, link_id: int | None) -> list[dict]:
+        """Вступления одной ссылки (link_id=None — все «не по нашим ссылкам») для графика по дням."""
+        with self._conn() as conn:
+            if link_id is None:
+                rows = conn.execute("SELECT joined_at, left_at FROM link_joins WHERE link_id IS NULL").fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT joined_at, left_at FROM link_joins WHERE link_id = ?", (link_id,)
+                ).fetchall()
+            return [dict(r) for r in rows]
+
+    def record_join(
+        self, update_id: int | None, link_id: int | None, invite_link: str | None,
+        user_id: int, joined_at: datetime,
+    ) -> bool:
+        """Идемпотентно по update_id: повторная обработка того же апдейта ничего не дублирует."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO link_joins (update_id, link_id, invite_link, user_id, joined_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (update_id, link_id, invite_link, user_id, joined_at.isoformat()),
+            )
+            return cur.rowcount > 0
+
+    def record_leave(self, user_id: int, left_at: datetime) -> bool:
+        """Отмечает выход на последнем ещё открытом вступлении этого человека (если мы его видели)."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                """UPDATE link_joins SET left_at = ?
+                   WHERE id = (SELECT id FROM link_joins WHERE user_id = ? AND left_at IS NULL
+                               ORDER BY joined_at DESC, id DESC LIMIT 1)""",
+                (left_at.isoformat(), user_id),
+            )
+            return cur.rowcount > 0
 
     # ---------- kv state (offset апдейтов Telegram, дата последнего отчёта, …) ----------
 
