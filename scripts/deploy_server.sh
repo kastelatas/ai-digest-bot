@@ -1,34 +1,49 @@
 #!/usr/bin/env bash
-# Разворачивает digest_bot на Linux-сервере (Debian/Ubuntu) и прописывает cron.
-# Запускать НА СЕРВЕРЕ под root, после загрузки архива проекта:
+# Разворачивает/обновляет digest_bot на Linux-сервере (Debian/Ubuntu) через git и прописывает cron.
+# Запускать НА СЕРВЕРЕ под root:
 #
-#   bash deploy_server.sh [/путь/к/bot.tgz]       # по умолчанию /opt/bot.tgz
-#   SET_TZ=1 bash deploy_server.sh                 # ещё и выставить часовой пояс сервера как у канала
+#   bash deploy_server.sh                 # клонирует репозиторий (или git pull, если он уже есть)
+#   SET_TZ=1 bash deploy_server.sh        # ещё и выставить часовой пояс сервера как у канала
+#   BRANCH=dev bash deploy_server.sh      # другая ветка (по умолчанию main)
 #
-# Повторный запуск безопасен: код обновляется, а .env, data/ и logs/ остаются.
+# Секреты в git не хранятся: .env и config.yaml нужно один раз положить в /opt/ai-digest-bot
+# (скрипт при их отсутствии остановится и подскажет как). Повторный запуск безопасен —
+# это же и способ обновления: код тянется из git, .env, config.yaml, data/ и logs/ остаются.
 # Слоты publish берутся из config.yaml -> posting.slots.
 set -euo pipefail
 
-ARCHIVE="${1:-/opt/bot.tgz}"
+REPO_URL="${REPO_URL:-https://github.com/kastelatas/ai-digest-bot.git}"
+BRANCH="${BRANCH:-main}"
 APP_DIR=/opt/ai-digest-bot
 MARK_BEGIN="# >>> ai-digest-bot >>>"
 MARK_END="# <<< ai-digest-bot <<<"
 
 [ "$(id -u)" -eq 0 ] || { echo "Запустите под root"; exit 1; }
-[ -f "$ARCHIVE" ] || { echo "Не найден архив $ARCHIVE (загрузите его через scp)"; exit 1; }
 
 echo "==> Системные пакеты"
 apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-venv cron >/dev/null
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git python3 python3-venv cron >/dev/null
 
-echo "==> Распаковка в $APP_DIR"
-mkdir -p /opt
-tar xzf "$ARCHIVE" -C /opt
+echo "==> Код из git ($REPO_URL, ветка $BRANCH)"
+if [ -d "$APP_DIR/.git" ]; then
+  git -C "$APP_DIR" fetch -q origin "$BRANCH"
+  git -C "$APP_DIR" checkout -q "$BRANCH"
+  git -C "$APP_DIR" merge --ff-only "origin/$BRANCH"
+else
+  git clone -q -b "$BRANCH" "$REPO_URL" "$APP_DIR"
+fi
 cd "$APP_DIR"
-[ -f .env ] || { echo "В архиве нет .env"; exit 1; }
-[ -f config.yaml ] || { echo "В архиве нет config.yaml"; exit 1; }
-chmod 600 .env
 mkdir -p logs data
+
+if [ ! -f .env ] || [ ! -f config.yaml ]; then
+  echo
+  echo "Код на сервере, но нет секретов (.env и/или config.yaml) — они не хранятся в git."
+  echo "С вашего ПК (PowerShell) выполните:"
+  echo "  scp E:\TG\ai-digest-bot\.env E:\TG\ai-digest-bot\config.yaml root@<IP-сервера>:$APP_DIR/"
+  echo "и запустите этот скрипт ещё раз."
+  exit 2
+fi
+chmod 600 .env
 
 echo "==> venv и зависимости"
 [ -d venv ] || python3 -m venv venv
