@@ -28,7 +28,7 @@ from digest_bot import tracker_sync
 from digest_bot.config import ROOT, load_config
 from digest_bot.db import Database
 from digest_bot.fetch import fetch_all
-from digest_bot.llm import AnthropicSummarizer, TemplateSummarizer
+from digest_bot.llm import build_summarizer
 from digest_bot.pipeline import run_fetch_and_draft
 from digest_bot.telegram_api import TelegramAPI
 
@@ -50,17 +50,7 @@ def _build_context(args):
 
 def cmd_fetch(args) -> int:
     cfg, db, telegram = _build_context(args)
-    if cfg.anthropic_api_key:
-        summarizer = AnthropicSummarizer(
-            api_key=cfg.anthropic_api_key,
-            model=cfg.llm_model,
-            max_tokens=cfg.llm_max_tokens,
-            temperature=cfg.llm_temperature,
-            style=cfg.llm_style,
-        )
-    else:
-        logger.warning("ANTHROPIC_API_KEY не задан — использую офлайн-шаблон (демо-режим, не для публикации как есть)")
-        summarizer = TemplateSummarizer()
+    summarizer = build_summarizer(cfg)
 
     fetcher = partial(fetch_all, max_items_per_source=cfg.max_items_per_source)
     stats = run_fetch_and_draft(cfg, db, summarizer, telegram, fetcher=fetcher)

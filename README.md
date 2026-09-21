@@ -1,7 +1,7 @@
 # AI/IT-дайджест бот для Telegram
 
 Полуавтоматический пайплайн для канала: собирает новости из RSS, пишет черновик
-поста через Claude, присылает вам на одобрение кнопками в Telegram, публикует
+поста через LLM (OpenRouter или Claude), присылает вам на одобрение кнопками в Telegram, публикует
 по расписанию, ведёт мини-CRM по рекламе и считает недельный отчёт.
 
 Специально **не** публикует посты без вашего одобрения — это осознанное
@@ -22,7 +22,7 @@ ai-digest-bot/
 ├── digest_bot/               # весь код пайплайна
 │   ├── fetch.py             # скачивание и разбор RSS/Atom (без feedparser)
 │   ├── dedup.py             # дедуп по смыслу (нечёткое сравнение заголовков)
-│   ├── llm.py                # написание черновика через Claude API
+│   ├── llm.py                # написание черновика: OpenRouter / Anthropic (llm.provider)
 │   ├── telegram_api.py       # тонкая обёртка над Bot API
 │   ├── pipeline.py           # шаг 1-2: fetch → dedup → LLM → отправка на одобрение
 │   ├── moderation.py         # обработка кнопок в админ-чате
@@ -59,11 +59,18 @@ cp .env.example .env                  # впишите токены
 - `TELEGRAM_BOT_TOKEN` — токен от [@BotFather](https://t.me/BotFather). Бота
   нужно добавить админом и в канал (публиковать посты), и в админ-чат
   (личку с ботом или закрытую группу — присылать черновики на одобрение).
-- `ANTHROPIC_API_KEY` — ключ с [console.anthropic.com](https://console.anthropic.com).
-  Без него `fetch` работает в офлайн-демо-режиме (просто обрезает текст
+- `OPENROUTER_API_KEY` — ключ с [openrouter.ai/keys](https://openrouter.ai/keys)
+  (провайдер по умолчанию, `llm.provider: "openrouter"`). Или `ANTHROPIC_API_KEY`
+  с [console.anthropic.com](https://console.anthropic.com), если выбран
+  `llm.provider: "anthropic"` — нужен ключ только выбранного провайдера.
+  Без ключа `fetch` работает в офлайн-демо-режиме (просто обрезает текст
   источника, публиковать такое в канал не стоит).
 
 В `config.yaml`:
+- `llm.provider` и `llm.model` — для OpenRouter модель пишется как «вендор/модель»
+  ([каталог](https://openrouter.ai/models)). По умолчанию `google/gemini-3.1-flash-lite`
+  (дёшево, хороший русский); бесплатный вариант с лимитами — `google/gemma-4-31b-it:free`.
+  Своя OpenAI-совместимая точка — `llm.base_url`.
 - `channel.chat_id` — `@username` канала или числовой id для приватного.
 - `admin.chat_id` и `admin.allowed_user_ids` — куда слать черновики и кто
   имеет право их одобрять (проверяется по `from.id` в нажатии кнопки).
@@ -127,7 +134,7 @@ scripts\install_tasks.bat
 1. **`fetch`** — скачивает все включённые RSS/Atom-ленты, отбрасывает уже
    виденные ссылки и новости старше `max_item_age_hours`, отсеивает почти
    одинаковые заголовки с разных источников (нечёткое сравнение). Для
-   каждой оставшейся новости просит Claude написать пост **только на основе
+   каждой оставшейся новости просит LLM написать пост **только на основе
    переданного текста** — если фактов мало, модель обязана вернуть отказ, а
    не выдумывать. Готовый черновик уходит в админ-чат с тремя кнопками:
    ✅ Опубликовать · ✏️ Правки нужны · ❌ Отклонить.
@@ -234,7 +241,7 @@ venv/Scripts/python cli.py sync-tracker [--xlsx путь/к/файлу.xlsx]
 python3 -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-84 теста, `unittest` (никаких pytest/сетевых вызовов — Telegram и Claude API
+98 тестов, `unittest` (никаких pytest/сетевых вызовов — Telegram и LLM API
 подменены фейками в `tests/helpers.py`). Тесты `sync-tracker` требуют openpyxl
 (без него они пропускаются). На Windows: `venv\Scripts\python -m unittest discover -s tests`.
 

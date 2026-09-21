@@ -64,11 +64,16 @@ if [ "$SERVER_TZ" != "$CHANNEL_TZ" ]; then
 fi
 
 echo "==> cron"
-# fetch без ключа Anthropic засыпал бы админ-чат сырыми черновиками — отключаем его до появления ключа
+# fetch без ключа LLM засыпал бы админ-чат сырыми черновиками — отключаем его до появления ключа
+LLM_PROVIDER=$(venv/bin/python -c "from digest_bot.config import load_config; print(load_config().llm_provider.lower())")
+case "$LLM_PROVIDER" in
+  openrouter) KEY_VAR=OPENROUTER_API_KEY ;;
+  *)          KEY_VAR=ANTHROPIC_API_KEY ;;
+esac
 FETCH_PREFIX=""
-if ! grep -Eq '^ANTHROPIC_API_KEY=.+' .env; then
+if ! grep -Eq "^${KEY_VAR}=.+" .env; then
   FETCH_PREFIX="#"
-  echo "ВНИМАНИЕ: ANTHROPIC_API_KEY пуст — задача fetch закомментирована. Впишите ключ в .env и запустите скрипт снова."
+  echo "ВНИМАНИЕ: $KEY_VAR пуст (llm.provider=$LLM_PROVIDER) — задача fetch закомментирована. Впишите ключ в .env и запустите скрипт снова."
 fi
 
 PUBLISH_LINES=$(venv/bin/python - <<'PY'

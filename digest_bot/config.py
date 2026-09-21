@@ -63,6 +63,8 @@ class Config:
 
     telegram_bot_token: str = field(default="", repr=False)
     anthropic_api_key: str = field(default="", repr=False)
+    openrouter_api_key: str = field(default="", repr=False)
+    llm_base_url: str = ""  # пусто = адрес провайдера по умолчанию
 
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
@@ -113,5 +115,7 @@ def load_config(config_path: str | Path | None = None, env_path: str | Path | No
         ads_currency=data.get("ads", {}).get("currency", "USD"),
         telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+        openrouter_api_key=os.environ.get("OPENROUTER_API_KEY", ""),
+        llm_base_url=str(data.get("llm", {}).get("base_url", "") or ""),
         raw=data,
     )

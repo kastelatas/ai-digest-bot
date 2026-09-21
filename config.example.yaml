@@ -75,8 +75,14 @@ sources:
     enabled: true
 
 llm:
-  provider: "anthropic"
-  model: "claude-sonnet-5"
+  # "openrouter" (ключ OPENROUTER_API_KEY) или "anthropic" (ключ ANTHROPIC_API_KEY)
+  provider: "openrouter"
+  # для openrouter — "вендор/модель", список: https://openrouter.ai/models
+  # дёшево и хорошо по-русски: google/gemini-3.1-flash-lite; бесплатно (с лимитами): google/gemma-4-31b-it:free
+  # для anthropic — например "claude-sonnet-5"
+  model: "google/gemini-3.1-flash-lite"
+  # необязательно: свой адрес OpenAI-совместимого API (по умолчанию https://openrouter.ai/api/v1)
+  # base_url: ""
   # максимум токенов на один черновик поста
   max_tokens: 900
   # температура низкая — нам нужна точность пересказа, а не креатив
