@@ -153,6 +153,7 @@ export default function Links({ telegramEnabled, defaultCurrency }) {
           telegramEnabled={telegramEnabled}
           onClose={() => setEditor(null)}
           onCopy={copy}
+          onChanged={load}
           onSaved={(_, message) => { setEditor(null); setToast({ ok: true, text: message }); load(); }}
         />
       ) : null}
