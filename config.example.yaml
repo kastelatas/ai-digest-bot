@@ -1,0 +1,90 @@
+# Скопируйте в config.yaml и заполните.
+# Секреты (токены, ключи) сюда НЕ писать — они читаются из переменных окружения / .env.
+# См. .env.example.
+
+channel:
+  # @username канала или числовой chat_id (для приватных каналов)
+  chat_id: "@your_ai_it_digest"
+  # часовой пояс канала/автора, IANA-имя
+  timezone: "Europe/Kyiv"
+
+admin:
+  # chat_id админ-чата (личка с ботом или закрытая группа-админка), куда бот присылает черновики на одобрение
+  chat_id: 000000000
+  # user_id, которым разрешено нажимать кнопки одобрения/отклонения
+  allowed_user_ids:
+    - 000000000
+
+posting:
+  # слоты публикации по местному времени канала, "HH:MM"
+  slots: ["10:00", "14:00", "19:00"]
+  # максимум обычных постов в день (не считая рекламных)
+  max_posts_per_day: 3
+  # минимальный интервал между постами одной темы (часы) — защита от дублей по смыслу
+  topic_cooldown_hours: 48
+
+fetch:
+  # как часто запускать сбор (для справки — реальный интервал задаёт cron/systemd, см. README)
+  interval_minutes: 30
+  # сколько последних элементов на фиде проверять за проход
+  max_items_per_source: 15
+  # старше скольки часов новость уже не берём в черновик
+  max_item_age_hours: 36
+
+sources:
+  - name: "TechCrunch AI"
+    url: "https://techcrunch.com/category/artificial-intelligence/feed/"
+    lang: "en"
+    category: "ai_news"
+    weight: 1.0
+    enabled: true
+
+  - name: "OpenAI News"
+    url: "https://openai.com/news/rss.xml"
+    lang: "en"
+    category: "ai_labs"
+    weight: 1.2
+    enabled: true
+
+  - name: "MIT Technology Review"
+    url: "https://www.technologyreview.com/feed/"
+    lang: "en"
+    category: "ai_deep"
+    weight: 1.0
+    enabled: true
+
+  - name: "Hacker News — Front Page"
+    url: "https://news.ycombinator.com/rss"
+    lang: "en"
+    category: "tech_general"
+    weight: 0.6
+    enabled: true
+
+  - name: "Habr — Искусственный интеллект"
+    url: "https://habr.com/ru/rss/hub/artificial_intelligence/all/?fl=ru"
+    lang: "ru"
+    category: "ai_ru"
+    weight: 1.0
+    enabled: true
+
+  - name: "Habr — Разработка"
+    url: "https://habr.com/ru/rss/flows/develop/all/?fl=ru"
+    lang: "ru"
+    category: "dev_ru"
+    weight: 0.7
+    enabled: true
+
+llm:
+  provider: "anthropic"
+  model: "claude-sonnet-5"
+  # максимум токенов на один черновик поста
+  max_tokens: 900
+  # температура низкая — нам нужна точность пересказа, а не креатив
+  temperature: 0.3
+  # стиль канала — подставляется в системный промпт
+  style: "экспертный, без воды, без кликбейта, короткие абзацы, дружелюбный тон"
+
+ads:
+  # через сколько часов автоматически напоминать снять/снимать рекламный пост
+  default_removal_hours: 48
+  currency: "USD"
