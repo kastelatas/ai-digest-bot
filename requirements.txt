@@ -1,5 +1,11 @@
 # Обязательная зависимость
 requests>=2.31,<3
+# читает config.yaml (digest_bot/config.py)
+PyYAML>=6,<7
+# sync-tracker пишет в tracker/channel_tracker.xlsx
+openpyxl>=3.1,<4
+# база часовых поясов для zoneinfo (на Windows её нет в системе)
+tzdata; sys_platform == "win32"
 
 # Опционально: реальные просмотры постов через MTProto (не Bot API).
 # Использует user-аккаунт, поэтому подключайте осознанно — см. README, раздел "Метрики".

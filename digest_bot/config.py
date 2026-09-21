@@ -71,6 +71,9 @@ def load_config(config_path: str | Path | None = None, env_path: str | Path | No
     load_dotenv(Path(env_path) if env_path else ROOT / ".env")
 
     path = Path(config_path) if config_path else ROOT / "config.yaml"
+    if config_path and not path.exists():
+        # явно заданный путь не должен тихо подменяться example-конфигом с фиктивными chat_id
+        raise FileNotFoundError(f"Конфиг не найден: {path}")
     if not path.exists():
         # позволяет запускать тесты/демо без реального config.yaml
         path = ROOT / "config.example.yaml"

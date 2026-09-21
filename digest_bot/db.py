@@ -282,6 +282,11 @@ class Database:
                 (datetime.utcnow().isoformat(), subscribers),
             )
 
+    def all_channel_stats(self) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM channel_stats ORDER BY captured_at ASC, id ASC").fetchall()
+            return [dict(r) for r in rows]
+
     def channel_stats_since(self, since: datetime) -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute(
@@ -337,6 +342,11 @@ class Database:
     def mark_ad_removed(self, ad_id: int) -> None:
         with self._conn() as conn:
             conn.execute("UPDATE ads SET status = ? WHERE id = ?", (AdStatus.REMOVED.value, ad_id))
+
+    def all_ads(self) -> list[AdBooking]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM ads ORDER BY id ASC").fetchall()
+            return [self._row_to_ad(r) for r in rows]
 
     def ads_between(self, start: datetime, end: datetime) -> list[AdBooking]:
         # Верхняя граница включительно: end обычно = "сейчас" (момент генерации

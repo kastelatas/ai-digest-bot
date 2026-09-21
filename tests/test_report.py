@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -48,7 +49,9 @@ class WeeklyReportTests(unittest.TestCase):
         # искусственно "состарим" первую запись, чтобы она попала в начало периода
         import sqlite3
 
-        with sqlite3.connect(self.db.path) as conn:
+        # closing(): sqlite3-контекст только коммитит, но не закрывает соединение,
+        # а на Windows незакрытый файл БД мешает удалить временную папку
+        with closing(sqlite3.connect(self.db.path)) as conn, conn:
             conn.execute(
                 "UPDATE channel_stats SET captured_at = ? WHERE subscribers = 1000",
                 ((self.now - timedelta(days=6)).isoformat(),),

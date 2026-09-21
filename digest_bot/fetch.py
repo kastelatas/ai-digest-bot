@@ -187,9 +187,15 @@ def fetch_source(source: Source, session: requests.Session | None = None) -> lis
     return parse_feed(raw, source)
 
 
-def fetch_all(sources: list[Source], session: requests.Session | None = None) -> list[FeedItem]:
+def fetch_all(
+    sources: list[Source],
+    session: requests.Session | None = None,
+    max_items_per_source: int | None = None,
+) -> list[FeedItem]:
+    """max_items_per_source — брать только первые N записей каждой ленты (в RSS новые идут первыми)."""
     sess = session or requests.Session()
     all_items: list[FeedItem] = []
     for source in sources:
-        all_items.extend(fetch_source(source, session=sess))
+        items = fetch_source(source, session=sess)
+        all_items.extend(items[:max_items_per_source] if max_items_per_source else items)
     return all_items
