@@ -72,9 +72,19 @@ class TelegramAPI:
         return self._call("sendMessage", payload)
 
     def edit_message_text(
-        self, chat_id: str | int, message_id: int, text: str, reply_markup: dict | None = None
+        self,
+        chat_id: str | int,
+        message_id: int,
+        text: str,
+        reply_markup: dict | None = None,
+        parse_mode: str | None = None,
+        disable_web_page_preview: bool | None = None,
     ) -> dict:
         payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "text": text}
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        if disable_web_page_preview is not None:
+            payload["disable_web_page_preview"] = disable_web_page_preview
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
         return self._call("editMessageText", payload)

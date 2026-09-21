@@ -1,0 +1,31 @@
+# Надстройка над docker-compose.yml: HTTPS через Caddy.
+#   docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
+# Нужны открытые порты 80 и 443 и PANEL_DOMAIN в .env.
+services:
+  panel:
+    ports: !override
+      - "127.0.0.1:${PANEL_PORT:-8080}:8080"   # напрямую снаружи панель недоступна — только через Caddy
+    environment:
+      COOKIE_SECURE: "1"
+    # за прокси реальный адрес клиента приходит в X-Forwarded-For — нужен для блокировки перебора пароля
+    command: ["uvicorn", "--factory", "digest_web.app:create_app", "--host", "0.0.0.0", "--port", "8080",
+              "--proxy-headers", "--forwarded-allow-ips", "*"]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - panel
+    environment:
+      PANEL_DOMAIN: ${PANEL_DOMAIN:?задайте PANEL_DOMAIN в .env, например 1-2-3-4.sslip.io}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

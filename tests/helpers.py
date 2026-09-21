@@ -93,7 +93,8 @@ class FakeTelegramAPI:
     записывает вызовы, чтобы их можно было проверить в assert-ах.
     """
 
-    def __init__(self, subscriber_count: int = 1000, fail_send: bool = False):
+    def __init__(self, subscriber_count: int = 1000, fail_send: bool = False,
+                 fail_delete: bool = False, edit_error: str | None = None):
         self._next_message_id = 1000
         self.sent: list[dict] = []
         self.edited_text: list[dict] = []
@@ -104,6 +105,8 @@ class FakeTelegramAPI:
         self._next_update_id = 1
         self.subscriber_count = subscriber_count
         self.fail_send = fail_send
+        self.fail_delete = fail_delete
+        self.edit_error = edit_error
 
     # ---- запись ----
 
@@ -115,8 +118,11 @@ class FakeTelegramAPI:
         self.sent.append({"chat_id": chat_id, "text": text, "reply_markup": reply_markup, "message_id": msg_id})
         return {"message_id": msg_id, "chat": {"id": chat_id}, "text": text}
 
-    def edit_message_text(self, chat_id, message_id, text, reply_markup=None):
-        self.edited_text.append({"chat_id": chat_id, "message_id": message_id, "text": text})
+    def edit_message_text(self, chat_id, message_id, text, reply_markup=None, parse_mode=None,
+                          disable_web_page_preview=None):
+        if self.edit_error:
+            raise TelegramAPIError("editMessageText", self.edit_error, 400)
+        self.edited_text.append({"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": parse_mode})
         return {"message_id": message_id}
 
     def edit_message_reply_markup(self, chat_id, message_id, reply_markup):
@@ -124,6 +130,8 @@ class FakeTelegramAPI:
         return {"message_id": message_id}
 
     def delete_message(self, chat_id, message_id):
+        if self.fail_delete:
+            return False
         self.deleted.append((chat_id, message_id))
         return True
 

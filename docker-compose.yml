@@ -1,0 +1,31 @@
+# Веб-панель статистики и постов.
+#   docker compose up -d --build      — собрать и запустить
+#   docker compose logs -f panel      — логи
+#
+# Нужно рядом: .env (TELEGRAM_BOT_TOKEN, ADMIN_PASSWORD), config.yaml, data/digest.db.
+# Панель читает и пишет ту же SQLite-базу, что и cron-задачи бота (режим WAL это допускает).
+services:
+  panel:
+    build: .
+    image: digest-panel
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DIGEST_DB_PATH: /app/data/digest.db
+      # COOKIE_SECURE: "1"        # включите, если панель открыта по HTTPS (за reverse-proxy)
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+    ports:
+      # по умолчанию только localhost: снаружи — через SSH-туннель или reverse-proxy с HTTPS.
+      # Чтобы открыть наружу: PANEL_BIND=0.0.0.0 (и обязательно HTTPS + сильный ADMIN_PASSWORD)
+      - "${PANEL_BIND:-127.0.0.1}:${PANEL_PORT:-8080}:8080"
+    # тот же пользователь, что владеет data/ (cron на сервере работает от root, поэтому 0 по умолчанию)
+    user: "${PANEL_UID:-0}:${PANEL_GID:-0}"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

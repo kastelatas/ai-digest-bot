@@ -62,6 +62,7 @@ class Draft:
     admin_message_id: int | None = None
     channel_message_id: int | None = None
     published_at: datetime | None = None
+    admin_chat_id: int | None = None
 
 
 @dataclass

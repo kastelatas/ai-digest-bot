@@ -204,6 +204,44 @@ class Database:
         with self._conn() as conn:
             conn.execute("UPDATE drafts SET status = ? WHERE id = ?", (status.value, draft_id))
 
+    def list_drafts(
+        self, status: str | None = None, search: str | None = None, limit: int = 25, offset: int = 0
+    ) -> tuple[list[Draft], int]:
+        """Страница черновиков (новые первыми) и общее число под фильтр — для веб-панели."""
+        where, params = [], []
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        if search:
+            like = f"%{search}%"
+            where.append("(title LIKE ? OR draft_text LIKE ?)")
+            params += [like, like]
+        clause = f" WHERE {' AND '.join(where)}" if where else ""
+        with self._conn() as conn:
+            total = conn.execute(f"SELECT COUNT(*) FROM drafts{clause}", params).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT * FROM drafts{clause} ORDER BY id DESC LIMIT ? OFFSET ?",
+                [*params, limit, offset],
+            ).fetchall()
+            return [self._row_to_draft(r) for r in rows], total
+
+    def draft_counts(self) -> dict[str, int]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT status, COUNT(*) AS n FROM drafts GROUP BY status").fetchall()
+            return {r["status"]: r["n"] for r in rows}
+
+    def update_draft_text(self, draft_id: int, text: str) -> None:
+        with self._conn() as conn:
+            conn.execute("UPDATE drafts SET draft_text = ? WHERE id = ?", (text, draft_id))
+
+    def delete_draft(self, draft_id: int) -> None:
+        # строка в items остаётся — новость не будет предложена повторно
+        with self._conn() as conn:
+            conn.execute("DELETE FROM drafts WHERE id = ?", (draft_id,))
+
+    def mark_item_drafted(self, guid: str) -> None:
+        self.mark_item_status(guid, "drafted")
+
     def approved_drafts(self) -> list[Draft]:
         with self._conn() as conn:
             rows = conn.execute(
@@ -249,6 +287,7 @@ class Database:
             status=DraftStatus(row["status"]),
             created_at=_parse_dt(row["created_at"]),
             admin_message_id=row["admin_message_id"],
+            admin_chat_id=row["admin_chat_id"],
             channel_message_id=row["channel_message_id"],
             published_at=_parse_dt(row["published_at"]),
         )
